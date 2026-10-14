@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>FoodWise AI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#eef3ee;--card:#fff;--ink:#16352b;--mut:#5b7268;--line:#d3ddd5;--acc:#2f7d4f;--hot:#e0a526;--bad:#c0392b;--soft:#e3eee6}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1c17;--card:#17291f;--ink:#e6f0e8;--mut:#9ab3a5;--line:#2a4034;--acc:#5fc487;--hot:#e8b84a;--bad:#ef7b6d;--soft:#1f3529}}
+:root[data-theme="dark"]{--bg:#0f1c17;--card:#17291f;--ink:#e6f0e8;--mut:#9ab3a5;--line:#2a4034;--acc:#5fc487;--hot:#e8b84a;--bad:#ef7b6d;--soft:#1f3529}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Bricolage Grotesque",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;background:var(--ink);color:#eef3ee}
+header h1{margin:0;font-size:22px;font-weight:800}header h1 span{color:var(--hot)}
+select,input,button{font:inherit;color:inherit}
+header select{background:#24473a;color:#fff;border:0;border-radius:8px;padding:6px 10px}
+nav{display:flex;gap:4px;overflow-x:auto;padding:10px 20px 0;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;padding:8px 14px;border-bottom:3px solid transparent;cursor:pointer;color:var(--mut);white-space:nowrap}
+nav button.on{color:var(--ink);border-color:var(--hot);font-weight:600}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.g{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.c{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.c h3{margin:0 0 8px;font-size:16px}.big{font-size:32px;font-weight:800;line-height:1.1}.mut{color:var(--mut);font-size:13px}
+.warn{border-left:5px solid var(--hot)}.bad{border-left-color:var(--bad)}.ok{border-left:5px solid var(--acc)}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
+input,select.f{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+input[type=checkbox]{width:auto}input[type=range]{padding:0}
+.b{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font-weight:600;margin-top:10px}
+.b2{background:var(--soft);color:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.sc{overflow-x:auto}.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--soft)}
+.steps{display:flex;gap:6px;margin:8px 0;flex-wrap:wrap}.steps span{padding:3px 10px;border-radius:99px;background:var(--soft);font-size:12px}.steps .d{background:var(--acc);color:#fff}
+svg text{fill:var(--mut);font-size:11px}textarea{width:100%;height:120px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;font:12px monospace}
+</style></head><body>
+<header><h1>FoodWise <span>AI</span></h1>
+<div id="side"></div></header>
+<nav id="nav"></nav><main id="app"></main>
+<script>
+// ---------- Synthetic data (labelled as demo) ----------
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+const PER=['Breakfast','Lunch','Dinner'],BASE={Breakfast:80,Lunch:140,Dinner:110},WF=[.6,1,1.05,1,1.02,.9,.7];
+const MENU={Breakfast:['Idli & Sambar','Poha','Dosa'],Lunch:['Veg Rice','Biryani','Chapati Meals'],Dinner:['Fried Rice','Parotta','Chapati Meals']};
+const iso=d=>d.toISOString().slice(0,10),DAY=864e5,today=new Date(new Date().toISOString().slice(0,10));
+const rows=[];
+for(let i=56;i>=1;i--){const d=new Date(+today-i*DAY),ev=[44,27,15].includes(i);
+ PER.forEach(p=>{const dem=Math.round(BASE[p]*WF[d.getUTCDay()]*(ev?1.3:1)*(.9+rnd()*.2)),prep=Math.round(dem*(1.1+rnd()*.15)),sold=Math.min(prep,dem);
+ rows.push({date:iso(d),period:p,menu:MENU[p][i%3],prep,sold,left:prep-sold,ev})})}
+const wd=s=>new Date(s+'T00:00:00Z').getUTCDay();
+// ---------- Prediction model ----------
+// Model: recency-weighted average of same-weekday demand (non-event days) x learned event uplift.
+// Baseline: overall average. "Sold" is used as a proxy for demand (stockouts are not recorded).
+function wmean(p,date,w){const h=rows.filter(r=>r.period===p&&r.date<date&&!r.ev&&wd(r.date)===w).slice(-5);
+ if(!h.length)return null;let s=0,t=0;h.forEach((r,i)=>{s+=r.sold*(i+1);t+=i+1});return s/t}
+function uplift(p,date){const e=rows.filter(r=>r.period===p&&r.date<date&&r.ev);const rs=e.map(r=>{const m=wmean(p,r.date,wd(r.date));return m?r.sold/m:null}).filter(Boolean);
+ return rs.length?rs.reduce((a,b)=>a+b)/rs.length:1.2}
+function predict(p,date,ev,upto=date){const m=wmean(p,upto,wd(date));const b=base(p,upto);return Math.round((m??b)*(ev?uplift(p,upto):1))}
+function base(p,upto){const h=rows.filter(r=>r.period===p&&r.date<upto&&!r.ev);return h.reduce((a,r)=>a+r.sold,0)/Math.max(1,h.length)}
+function backtest(p,n=14){const out=[];const days=[...new Set(rows.map(r=>r.date))].slice(-n);
+ days.forEach(d=>{const r=rows.find(x=>x.date===d&&x.period===p);if(!r)return;out.push({date:d,actual:r.sold,prep:r.prep,model:predict(p,d,r.ev),base:Math.round(base(p,d)*(1))})});return out}
+const mae=(a,k)=>a.reduce((s,r)=>s+Math.abs(r[k]-r.actual),0)/a.length;
+// ---------- State ----------
+let diet='veg',tab='dash',per='Lunch',role='donor',buf=10,plan=null,evSel=false,pdate=iso(new Date(+today+DAY)),msg='';
+const NGOS=[{n:'Annam Trust',dist:1.2,cap:150,veg:true},{n:'Hostel Welfare Society',dist:3.4,cap:60,veg:true},{n:'Shelter Home Care',dist:6.8,cap:300,veg:false}];
+const STAGES=['Listed','Reserved','Collected','Delivered'];
+let claims=[];let dons=[{id:1,donor:'Main Canteen',meals:35,don:30,claimed:0,menu:'Veg Rice',veg:true,hours:1.5,ngo:null,st:0,why:''},{id:2,donor:'Boys Hostel Mess',meals:20,don:20,claimed:8,menu:'Chapati Meals',veg:true,hours:0.5,ngo:null,st:0,why:''},{id:3,donor:'Event Catering Team',meals:25,don:25,claimed:0,menu:'Chicken Biryani',veg:false,hours:1,ngo:null,st:0,why:''}];
+const TABS={donor:['dash','predict','record','donate','reports'],receiver:['board','mine']};
+const NAMES={board:'Available food',mine:'My bookings',dash:'Dashboard',predict:'Predict',record:'Record meals',donate:'Post excess food',reports:'Reports'};
+function setRole(r){role=r;tab=TABS[r][0];render()}
+// ---------- Charts ----------
+function line(data,keys,cols){const W=640,H=200,m=34,mx=Math.max(...data.flatMap(d=>keys.map(k=>d[k])))*1.1,mn=Math.min(...data.flatMap(d=>keys.map(k=>d[k])))*.85;
+ const x=i=>m+i*(W-m-8)/Math.max(1,data.length-1),y=v=>H-24-(v-mn)/(mx-mn)*(H-40);
+ let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Chart of actual versus predicted demand">`;
+ for(let k=0;k<4;k++){const v=mn+(mx-mn)*k/3;s+=`<line x1="${m}" x2="${W-8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="2" y="${y(v)+4}">${Math.round(v)}</text>`}
+ keys.forEach((k,j)=>{s+=`<polyline fill="none" stroke="${cols[j]}" stroke-width="2.5" stroke-dasharray="${j?'5 4':'0'}" points="${data.map((d,i)=>x(i)+','+y(d[k])).join(' ')}"/>`});
+ s+=`<text x="${m}" y="${H-6}">${data[0].date.slice(5)}</text><text x="${W-48}" y="${H-6}">${data.at(-1).date.slice(5)}</text></svg>`;return s}
+function bars(items){const mx=Math.max(...items.map(i=>i.v));return items.map(i=>`<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><div style="width:130px;font-size:13px">${i.l}</div><div style="flex:1;background:var(--soft);border-radius:6px"><div style="width:${i.v/mx*100}%;background:var(--hot);height:18px;border-radius:6px"></div></div><div style="width:48px;font-size:13px">${i.v.toFixed(1)}%</div></div>`).join('')}
+// ---------- Views ----------
+function dash(){const t=rows.reduce((a,r)=>({p:a.p+r.prep,s:a.s+r.sold,l:a.l+r.left}),{p:0,s:0,l:0});
+ const tm=iso(new Date(+today+DAY)),w=wd(tm);let alerts='',cards='';
+ PER.forEach(p=>{const pr=predict(p,tm,false),typ=Math.round(rows.filter(r=>r.period===p&&wd(r.date)===w&&!r.ev).slice(-4).reduce((a,r)=>a+r.prep,0)/4),rec=Math.round(pr*(1+buf/100)),sur=Math.max(0,typ-pr);
+  cards+=`<div class="c"><h3>${p} tomorrow</h3><div class="big">${pr}</div><div class="mut">predicted meals sold</div><p>Suggested prep: <b>${rec}</b><br>Usual prep: ${typ}<br>Estimated surplus if usual: <b>${sur}</b></p></div>`;
+  if(typ>pr*1.15)alerts+=`<div class="c warn"><b>High surplus risk – ${p}.</b> Usual prep (${typ}) is more than 15% above the predicted demand (${pr}). Consider preparing about ${rec}.</div>`});
+ return `<div class="c mut">Demo data: 56 days of synthetic canteen records. Replace with real records via “Record meals”.</div>
+ <div class="g"><div class="c"><div class="big">${t.p}</div><div class="mut">meals prepared</div></div><div class="c"><div class="big">${t.s}</div><div class="mut">meals sold</div></div><div class="c"><div class="big">${t.l}</div><div class="mut">leftover meals</div></div><div class="c"><div class="big">${(t.l/t.p*100).toFixed(1)}%</div><div class="mut">excess food rate</div></div></div>
+ ${alerts||'<div class="c ok">No high-surplus alerts for tomorrow.</div>'}<div class="g">${cards}</div>
+ <div class="c"><h3>Excess food rate by menu item</h3>${bars(menuExcess())}</div>`}
+function menuExcess(){const m={};rows.forEach(r=>{m[r.menu]??={p:0,l:0};m[r.menu].p+=r.prep;m[r.menu].l+=r.left});return Object.entries(m).map(([l,o])=>({l,v:o.l/o.p*100})).sort((a,b)=>b.v-a.v)}
+function pred(){const bt=backtest(per),mm=mae(bt,'model'),bm=mae(bt,'base'),p=predict(per,pdate,evSel),rec=Math.round(p*(1+buf/100)),pl=plan??Math.round(p*1.2),sur=Math.max(0,pl-p),short=Math.max(0,p-pl);
+ const sim=bt.reduce((a,r)=>{const rc=Math.round(r.model*(1+buf/100));return{act:a.act+(r.prep-r.actual),sim:a.sim+Math.max(0,rc-r.actual),short:a.short+Math.max(0,r.actual-rc)}},{act:0,sim:0,short:0});
+ return `<div class="c"><h3>Forecast</h3><div class="g"><div><label>Meal period</label><select class="f" onchange="per=this.value;plan=null;render()">${PER.map(x=>`<option ${x===per?'selected':''}>${x}</option>`).join('')}</select></div>
+ <div><label>Date</label><input type="date" value="${pdate}" onchange="pdate=this.value;render()"></div>
+ <div><label>Planned quantity (blank = typical)</label><input type="number" value="${plan??''}" placeholder="${pl}" onchange="plan=this.value?+this.value:null;render()"></div>
+ <div><label>Safety buffer: ${buf}%</label><input type="range" min="0" max="25" value="${buf}" oninput="buf=+this.value;render()"></div></div>
+ <label><input type="checkbox" ${evSel?'checked':''} onchange="evSel=this.checked;render()"> Special event / holiday</label></div>
+ <div class="g"><div class="c"><div class="mut">Predicted demand</div><div class="big">${p}</div></div><div class="c ok"><div class="mut">Recommended prep</div><div class="big">${rec}</div></div>
+ <div class="c ${sur>p*.15?'warn':''}"><div class="mut">Estimated surplus (not guaranteed)</div><div class="big">${sur}</div>${short?`<div class="mut">Possible shortfall: ${short}</div>`:''}</div></div>
+ <div class="c"><h3>Actual vs predicted – last 14 days (${per})</h3>${line(bt,['actual','model','base'],['var(--ink)','var(--acc)','var(--hot)'])}
+ <div class="mut">Solid dark = actual sold · dashed green = model · dashed yellow = simple average baseline</div>
+ <p>Mean absolute error: model <b>${mm.toFixed(1)}</b> vs baseline <b>${bm.toFixed(1)}</b> meals. ${mm<bm?'The model beats the baseline on these held-out days.':'The model does not beat the baseline here; collect more data.'}</p>
+ <p class="mut">Simulation on these 14 days: actual leftovers ${sim.act} → ${sim.sim} if the recommended quantity had been used; days short of demand would total ${sim.short} meals. This is a simulation, not a measured saving.</p></div>`}
+function rec(){const last=[...rows].reverse().slice(0,10);
+ return `<div class="c"><h3>Record a service</h3><div class="g"><div><label>Date</label><input type="date" id="rd" value="${iso(today)}"></div><div><label>Period</label><select class="f" id="rp">${PER.map(x=>`<option>${x}</option>`).join('')}</select></div>
+ <div><label>Menu item</label><input id="rm" value="Veg Rice"></div><div><label>Prepared</label><input type="number" id="rpr" min="0"></div><div><label>Sold</label><input type="number" id="rs" min="0"></div></div>
+ <label><input type="checkbox" id="re"> Special event</label><button class="b" onclick="addRow()">Save record</button><div class="mut">${msg}</div></div>
+ <div class="c sc"><h3>Latest records</h3><table><tr><th>Date</th><th>Period</th><th>Menu</th><th>Prepared</th><th>Sold</th><th>Left</th></tr>${last.map(r=>`<tr><td>${r.date}</td><td>${r.period}</td><td>${r.menu}</td><td>${r.prep}</td><td>${r.sold}</td><td>${r.left}</td></tr>`).join('')}</table></div>`}
+function addRow(){const g=i=>document.getElementById(i),prep=+g('rpr').value,sold=+g('rs').value;
+ if(!g('rd').value||!g('rm').value||!(prep>0)||sold<0||sold>prep){msg='Enter a date, menu, prepared quantity above 0, and sold quantity not above prepared.';return render()}
+ rows.push({date:g('rd').value,period:g('rp').value,menu:g('rm').value,prep,sold,left:prep-sold,ev:g('re').checked});rows.sort((a,b)=>a.date<b.date?-1:1);msg='Record saved. Forecasts updated.';render()}
+// ---------- Donation workflow ----------
+function score(n,d){const cap=d.meals<=n.cap?40:10,dist=Math.max(0,40-n.dist*6),v=(!d.veg||n.veg)?20:0;return{t:Math.round(cap+dist+v),why:`${n.n}: capacity ${n.cap>=d.meals?'fits':'too small'} (${cap}), ${n.dist} km away (${Math.round(dist)}), diet ${v?'compatible':'not compatible'} (${v})`}}
+function donate(){const staff=role!=='ngo';
+ const form=staff?`<div class="c"><h3>List surplus food</h3><div class="g"><div><label>Meals left over</label><input type="number" id="dm" min="1"></div><div><label>Meals safe to donate (blank = all)</label><input type="number" id="dd" min="0"></div><div><label>Menu</label><input id="dn" value="Chapati Meals"></div><div><label>Hours since cooked</label><input type="number" id="dh" step=".5" min="0"></div></div>
+ <label><input type="checkbox" id="dt"> Held hot at 60°C or above, or chilled below 5°C</label><label><input type="checkbox" id="dc"> Covered in clean containers</label><label><input type="checkbox" id="dv" checked> Vegetarian (untick for non-vegetarian)</label>
+ <button class="b" onclick="addDon()">Run safety check and list</button><div class="mut">${msg}</div></div>`:'';
+ return form+dons.map(d=>{const ranked=NGOS.map(n=>({n,...score(n,d)})).sort((a,b)=>b.t-a.t);
+  return `<div class="c"><h3>${d.meals} meals · ${d.menu} <span class="tag">${d.veg?'Veg':'Non-veg'}</span></h3><div class="mut">Cooked ${d.hours} h ago · safe to collect within 4 h of cooking</div><div class="mut">${d.claimed} of ${d.don} donatable meals claimed.</div>${claims.filter(c=>c.id===d.id).map(c=>`<div class="mut">• ${c.name}: ${c.q} portions (pickup code ${c.code})</div>`).join('')}
+  <div class="steps">${STAGES.map((s,i)=>`<span class="${i<=d.st?'d':''}">${s}</span>`).join('')}</div>
+  ${d.ngo?`<p>Assigned to <b>${d.ngo}</b>.<br><span class="mut">${d.why}</span></p>`:`<div class="mut">Match ranking (explained):</div>${ranked.map(r=>`<div class="mut">${r.t}/100 – ${r.why}</div>`).join('')}`}
+  ${d.st<3?`<button class="b" onclick="adv(${d.id})">${d.st===0?'Reserve best match':'Mark '+STAGES[d.st+1].toLowerCase()}</button>`:'<div><b>Delivery confirmed. Counted as rescued.</b></div>'}</div>`}).join('')}
+function addDon(){const g=i=>document.getElementById(i),m=+g('dm').value,h=+g('dh').value;
+ if(!(m>0)||g('dh').value==='')return(msg='Enter the number of meals and hours since cooking.',render());
+ if(h>4||!g('dt').checked||!g('dc').checked)return(msg='Not listed: food must be within 4 hours of cooking, held at a safe temperature, and covered. Unsafe food must not be donated.',render());
+ dons.unshift({id:Date.now(),donor:'Main Canteen',meals:m,don:Math.min(m,g('dd').value===''?m:+g('dd').value),claimed:0,menu:g('dn').value,veg:g('dv').checked,hours:h,ngo:null,st:0,why:''});msg='Passed safety check and listed.';render()}
+function adv(id){const d=dons.find(x=>x.id===id);if(d.st===0){const r=NGOS.map(n=>({n,...score(n,d)})).sort((a,b)=>b.t-a.t)[0];d.ngo=r.n.n;d.why='Chosen because: '+r.why+' (total '+r.t+'/100).'}d.st++;render()}
+function rep(){const b=['Breakfast','Lunch','Dinner'].map(p=>{const r=rows.filter(x=>x.period===p),pr=r.reduce((a,x)=>a+x.prep,0);return{l:p,v:r.reduce((a,x)=>a+x.left,0)/pr*100}});
+ const rescued=dons.filter(d=>d.st===3).reduce((a,d)=>a+d.meals,0),csv='date,period,menu,prepared,sold,left,event\n'+rows.map(r=>[r.date,r.period,r.menu,r.prep,r.sold,r.left,r.ev].join(',')).join('\n');
+ return `<div class="g"><div class="c"><div class="big">${dons.length}</div><div class="mut">donation listings</div></div><div class="c"><div class="big">${rescued}</div><div class="mut">meals delivered (confirmed)</div></div></div>
+ <div class="c"><h3>Excess food rate by period</h3>${bars(b)}</div><div class="c"><h3>Excess food rate by menu item</h3>${bars(menuExcess())}</div>
+ <div class="c"><h3>Export CSV</h3><textarea readonly>${csv}</textarea><div class="mut">Select and copy into a spreadsheet.</div></div>`}
+function board(){const open=dons.filter(d=>4-d.hours>0&&d.veg===(diet==='veg')),left=open.reduce((a,d)=>a+d.meals,0),av=open.reduce((a,d)=>a+d.don-d.claimed,0);
+ return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><button class="b ${diet==='veg'?'':'b2'}" style="margin:0" onclick="diet='veg';render()">🟢 Vegetarian portal</button><button class="b ${diet==='veg'?'b2':''}" style="margin:0" onclick="diet='nonveg';render()">🔴 Non-vegetarian portal</button></div><div class="g"><div class="c"><div class="big">${left}</div><div class="mut">${diet==='veg'?'vegetarian':'non-vegetarian'} meals of excess food left right now</div></div><div class="c ok"><div class="big">${av}</div><div class="mut">meals available to donate</div></div></div>`+(open.length?`<div class="c sc"><h3>Available by donor</h3><table><tr><th>Donor</th><th>Food</th><th>Left</th><th>Available to book</th></tr>${open.map(d=>`<tr><td>${d.donor}</td><td>${d.menu}</td><td>${d.meals}</td><td><b>${d.don-d.claimed}</b></td></tr>`).join('')}</table></div>`:'')+(open.length?open.map(d=>{const a=d.don-d.claimed;return `<div class="c ${a?'':'warn'}"><h3>${d.menu} <span class="tag">${d.veg?'Veg':'Non-veg'}</span></h3><p>From <b>${d.donor}</b><br><b>${d.meals}</b> meals left · <b>${a}</b> available to book · ${d.claimed} already booked</p><div class="mut">Collect within ${(4-d.hours).toFixed(1)} h (safe window).</div>${a?`<label>Booking as</label><select class="f" id="cn${d.id}">${NGOS.map(n=>`<option>${n.n}</option>`).join('')}<option>Individual / community group</option></select><label>Portions to book</label><input type="number" id="cq${d.id}" min="1" max="${a}"><button class="b" onclick="claim(${d.id})">Book food</button>`:'<div><b>Fully claimed.</b></div>'}</div>`}).join(''):'<div class="c">No '+(diet==='veg'?'vegetarian':'non-vegetarian')+' excess food is posted right now. Check back later.</div>')+`<div class="mut">${msg}</div>`}
+function claim(id){const d=dons.find(x=>x.id===id),n=document.getElementById('cn'+id).value.trim(),q=+document.getElementById('cq'+id).value,a=d.don-d.claimed;
+ if(!n||!(q>0)||q>a){msg='Enter your name and a number of portions between 1 and '+a+'.';return render()}
+ d.claimed+=q;const code=String(Math.floor(1000+Math.random()*9000));claims.unshift({id:d.id,menu:d.menu,veg:d.veg,name:n,q,code});msg=q+' portions reserved for '+n+'. Your pickup code is '+code+'. Collect before the safe window ends.';render()}
+function mine(){return claims.length?claims.map(c=>`<div class="c ok"><h3>${c.menu} <span class="tag">${c.veg?'Veg':'Non-veg'}</span></h3><p>${c.q} portions for <b>${c.name}</b></p><div class="big">${c.code}</div><div class="mut">Show this pickup code at the canteen.</div></div>`).join(''):'<div class="c">You have no claims yet. Open “Available food” to claim excess food.</div>'}
+function render(){document.getElementById('side').innerHTML=[['donor','Donor side'],['receiver','Charity / people in need']].map(([r,l])=>`<button class="b ${role===r?'':'b2'}" style="margin:0 6px 0 0" onclick="setRole('${r}')">${l}</button>`).join('');const T=TABS[role];document.getElementById('nav').innerHTML=T.map(t=>`<button class="${t===tab?'on':''}" onclick="tab='${t}';render()">${NAMES[t]}</button>`).join('');
+ document.getElementById('app').innerHTML={dash,predict:pred,record:rec,donate,board,mine,reports:rep}[tab]()}
+render();
+</script></body></html>
